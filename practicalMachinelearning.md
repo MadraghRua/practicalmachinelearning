@@ -1,0 +1,194 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "MadraghRua"
+date: "November 6, 2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+#Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+##Data
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+
+The data for this project come from this source: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+#Initiation and Reproducibility of Packages
+To reproduce these analyses you will need to have the same sets of packaegs to do the analysis with. In addition you will need to use the same random seed value to generate the same kinds of results.
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rattle)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(corrplot)
+library(randomForest)
+library(RColorBrewer)
+```
+Finally set the seed to 56789 to standardize outcomes from the analysis
+```{r seed_setup, include=TRUE}
+set.seed(56789)
+```
+
+## Getting Data from the Web
+Initalize the current working directory as follows:
+```{r setCwd, include=TRUE}
+setwd("./Project")
+```
+Now download the training and test data from the web. Put this into a data folder under the Project directory.
+```{r getData, include=TRUE}
+trainingURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testingURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+trainingFile <- "./data/pml-training.csv"
+testingFile <- "./data/pml-testing.csv"
+
+if(!file.exists("./data")) {
+  dir.create("./data")
+}
+if(!file.exists(trainingFile)) {
+  download.file(trainingURL, destfile = trainingFile, method = "auto")
+}
+if(!file.exists(testingFile)) {
+  download.file(testingURL, destfile = testingFile, method = "auto")
+}
+
+```
+##Reading Data
+Now read the two data files into frames.
+```{r readData, include=TRUE}
+trainingFrame = read.csv(trainingFile)
+testingFrame = read.csv(testingFile)
+dim(trainingFrame)
+dim(testingFrame)
+```
+The training data set contains 19622 observations and 160 variable.
+The testing data set has 20 sets of observations, each with 160 variables.
+Of the variabes, the classe variable is the one we need to predict.
+
+##Cleaning Data
+First we clean up the Near Zero Variance valiables
+```{r cleanNZV, include=TRUE}
+NZV <- nearZeroVar(trainingFrame, saveMetrics = TRUE)
+head(NZV, 20)
+
+```
+Now we update the two frames for the corrections
+```{r correctNZV, include=TRUE}
+trainingCorrected1 <- trainingFrame[, !NZV$nzv]
+testingCorrected1 <- testingFrame[, !NZV$nzv]
+dim(trainingCorrected1)
+dim(testingCorrected1)
+```
+Although the training data remains the same the testing data diminishes from 160 variables to 100.
+
+Now we remove columns that contain textual descriptions that don't have accelerometer measurements.
+```{r removetext, include=TRUE}
+text <- grepl("^X|timestamp|user_name", names(trainingCorrected1))
+trainingCorrected2 <- trainingCorrected1[, !text]
+testingCorrected2 <- testingCorrected1[, !text]
+dim(trainingCorrected2)
+dim(testingCorrected2)
+```
+The training data set now has 95 variables. The testing data is down to 95 variables.
+
+Next we remove all the NAs in the data.
+```{r removeNAs, include=TRUE}
+nas <- (colSums(is.na(trainingCorrected2)) == 0)
+trainingCorrected3 <- trainingCorrected2[, nas]
+testingCorrected3 <- testingCorrected2[, nas]
+dim(trainingCorrected3)
+dim(testingCorrected3)
+```
+At the end of all this cleaning and filtering the training data set has 19622 observations and 54 variables. The testing data set has 20 observations and 54 variables.
+
+##Generating a Correlation matrix of the Columns in the Training Data Set
+```{r trainingCorrMat, include=TRUE}
+corrplot(cor(trainingCorrected3[, -length(names(trainingCorrected3))]), method = "color", tl.cex = 0.5)
+```
+##Partitioning the Training Set
+We make a 70%/30% split of the training set to train/validate.
+```{r splitTrain, include=TRUE}
+set.seed(56789)
+trainPart <- createDataPartition(trainingCorrected3$classe, p = 0.70, list = FALSE)
+validationSet <- trainingCorrected3[-trainPart, ]
+trainingSet <- trainingCorrected3[trainPart, ]
+dim(validationSet)
+dim(trainingSet)
+```
+Now the Training data has 13737 observations
+The Validation data has 5885 observations.
+
+##Data Modeling
+A predictive model is created using a decision tree.
+```{r decisionTree, include=TRUE}
+tree <-rpart(classe ~ ., data = trainingSet, method = "class")
+prp(tree)
+```
+
+Now we look a how well the trained model fits the validation set data.
+A predictive model is created using a decision tree.
+```{r validationCheck, include=TRUE}
+validationTree <- predict(tree, validationSet, type = "class")
+confusionMatrix(validationSet$classe, validationTree)
+
+accuracy <- postResample(validationTree, validationSet$classe)
+outSampleError <- 1 - as.numeric(confusionMatrix(validationSet$classe, validationTree)$overall[1])
+accuracy
+outSampleError
+
+```
+So the estimated accuracy of the decision tree model is 74.5% and the Out of Sample is 25.5%
+
+##Random Forest 
+We now use Random Forest to fit a predictive model for activity.
+```{r randomForest, include=TRUE}
+modelRF <- train(classe ~ ., data = trainingSet, method = "rf", trControl = trainControl(method = "cv", 5), ntree = 250)
+modelRF
+```
+Now we estimate random forest vs the validation set
+We now use Random Forest to fit a predictive model for activity.
+```{r validRandomForest, include=TRUE}
+validRF <- predict(modelRF, validationSet)
+confusionMatrix(validationSet$classe, validRF)
+
+accuracy <- postResample(validRF, validationSet$classe)
+outSampleError <- 1 - as.numeric(confusionMatrix(validationSet$classe, validRF)$overall[1])
+```
+The estimated Accuracy for Random Forest is 99.8%. The Out of Sample Error is 0.19%.
+
+#Random Forest vs the Original Test Set
+Random Forest has performed best in these analyses. Noww we use the Random Forest to analyze the orignal test data set.
+```{r testSetAnalysis, include=TRUE}
+predict(modelRF, testingCorrected3[, -length(names(testingCorrected3))])
+
+```
+So the test model results are:
+test 1 - B 
+test 2 - A 
+test 3 - B
+test 4 - A
+test 5 - A
+test 6 - E
+test 7 - D
+test 8 - B
+test 9 - A
+test 10 - A
+test 11 - B
+test 12 - C
+test 13 - B
+test 14 - A
+test 15 - E
+test 16 - E
+test 17 - A
+test 18 - B
+test 19 - B
+test 20 - B
